@@ -58,7 +58,8 @@ public class ExplorersCompassConfig {
                 overlayLineOffset = data.client.overlayLineOffset;
                 overlaySide = data.client.overlaySide;
 
-                structureOverrides = data.custom.structureOverrides;
+                structureOverrides = new HashMap<>();
+                data.custom.structureOverrides.forEach((key, dto) -> structureOverrides.put(key, dto.intoPos()));
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -78,6 +79,16 @@ public class ExplorersCompassConfig {
             writer.close();
         } catch (IOException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    record CoordsDTO(int x, int y, int z) {
+        public BlockPos intoPos() {
+            return new BlockPos(x, y, z);
+        }
+
+        public static CoordsDTO fromBlockPos(BlockPos pos) {
+            return new CoordsDTO(pos.getX(), pos.getY(), pos.getZ());
         }
     }
 
@@ -162,7 +173,7 @@ public class ExplorersCompassConfig {
 
         private static class CustomWorldStructures {
             private final String structureOverridesComment = "Ты бля нахуй заполни блять и если оно тут будет то эти структуры будут браться, а не искаться.";
-            private final Map<String, BlockPos> structureOverrides;
+            private final Map<String, CoordsDTO> structureOverrides;
 
             private CustomWorldStructures() {
                 this.structureOverrides = new HashMap<>();
@@ -170,13 +181,15 @@ public class ExplorersCompassConfig {
             }
 
             private CustomWorldStructures(Map<String, BlockPos> structureOverrides) {
-                this.structureOverrides = structureOverrides;
+                var mapped = new HashMap<String, CoordsDTO>(structureOverrides.size());
+                structureOverrides.forEach((key, blockPos) -> mapped.put(key, CoordsDTO.fromBlockPos(blockPos)));
+                this.structureOverrides = mapped;
                 fill();
             }
 
             private void fill() {
                 if (this.structureOverrides.isEmpty()) {
-                    this.structureOverrides.put("example:structure", new BlockPos(0, 0, 0));
+                    this.structureOverrides.put("example:structure", new CoordsDTO(0, 0, 0));
                 }
             }
         }
