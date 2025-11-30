@@ -23,6 +23,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Hand;
 import net.minecraft.util.Identifier;
+import net.minecraft.util.Pair;
 import net.minecraft.util.TypedActionResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
@@ -30,211 +31,214 @@ import net.minecraft.world.gen.structure.Structure;
 
 public class ExplorersCompassItem extends Item {
 
-	public static final String NAME = "explorerscompass";
-	
-	private SearchWorkerManager workerManager;
+    public static final String NAME = "explorerscompass";
 
-	public ExplorersCompassItem() {
-		super(new Settings().maxCount(1));
-		workerManager = new SearchWorkerManager();
-	}
+    private SearchWorkerManager workerManager;
 
-	@Override
-	public TypedActionResult<ItemStack> use(World world, PlayerEntity player, Hand hand) {
-		if (!player.isSneaking()) {
-			if (world.isClient) {
-				final ItemStack stack = ItemUtils.getHeldItem(player, ExplorersCompass.EXPLORERS_COMPASS_ITEM);
-				GuiWrapper.openGUI(world, player, stack);
-			} else {
-				final ServerWorld serverWorld = (ServerWorld) world;
-				final ServerPlayerEntity serverPlayer = (ServerPlayerEntity) player;
-				final boolean canTeleport = ExplorersCompassConfig.allowTeleport && PlayerUtils.canTeleport(player);
-				final List<Identifier> allowedStructures = StructureUtils.getAllowedStructureIDs(serverWorld);
-				final ListMultimap<Identifier, Identifier> dimensionsForAllowedStructures = StructureUtils.getGeneratingDimensionIDsForAllowedStructures(serverWorld);
-				final Map<Identifier, Identifier> structureIDsToGroupIDs = StructureUtils.getStructureIDsToGroupIDs(serverWorld);
-				final ListMultimap<Identifier, Identifier> groupIDsToStructureIDs = StructureUtils.getGroupIDsToStructureIDs(serverWorld);
-				ServerPlayNetworking.send(serverPlayer, new SyncPacket(canTeleport, allowedStructures, dimensionsForAllowedStructures, structureIDsToGroupIDs, groupIDsToStructureIDs));
-			}
-		} else {
-			workerManager.stop();
-			workerManager.clear();
-			setState(player.getStackInHand(hand), null, CompassState.INACTIVE);
-		}
+    public ExplorersCompassItem() {
+        super(new Settings().maxCount(1));
+        workerManager = new SearchWorkerManager();
+    }
 
-		return TypedActionResult.pass(player.getStackInHand(hand));
-	}
+    @Override
+    public TypedActionResult<ItemStack> use(World world, PlayerEntity player, Hand hand) {
+        if (!player.isSneaking()) {
+            if (world.isClient) {
+                final ItemStack stack = ItemUtils.getHeldItem(player, ExplorersCompass.EXPLORERS_COMPASS_ITEM);
+                GuiWrapper.openGUI(world, player, stack);
+            } else {
+                final ServerWorld serverWorld = (ServerWorld) world;
+                final ServerPlayerEntity serverPlayer = (ServerPlayerEntity) player;
+                final boolean canTeleport = ExplorersCompassConfig.allowTeleport && PlayerUtils.canTeleport(player);
+                final List<Identifier> allowedStructures = StructureUtils.getAllowedStructureIDs(serverWorld);
+                final ListMultimap<Identifier, Identifier> dimensionsForAllowedStructures = StructureUtils.getGeneratingDimensionIDsForAllowedStructures(serverWorld);
+                final Map<Identifier, Identifier> structureIDsToGroupIDs = StructureUtils.getStructureIDsToGroupIDs(serverWorld);
+                final ListMultimap<Identifier, Identifier> groupIDsToStructureIDs = StructureUtils.getGroupIDsToStructureIDs(serverWorld);
+                ServerPlayNetworking.send(serverPlayer, new SyncPacket(canTeleport, allowedStructures, dimensionsForAllowedStructures, structureIDsToGroupIDs, groupIDsToStructureIDs));
+            }
+        } else {
+            workerManager.stop();
+            workerManager.clear();
+            setState(player.getStackInHand(hand), null, CompassState.INACTIVE);
+        }
 
-	public void searchForStructure(World world, PlayerEntity player, Identifier structureID, List<Identifier> structureIDs, BlockPos pos, ItemStack stack) {
-		setSearching(stack, structureID);
-		setSearchRadius(stack, 0);
-		if (world instanceof ServerWorld) {
-			ServerWorld serverWorld = (ServerWorld) world;
-			List<Structure> structures = new ArrayList<Structure>();
-			for (Identifier id : structureIDs) {
-				structures.add(StructureUtils.getStructureForID(serverWorld, id));
-			}
-			workerManager.stop();
-			workerManager.createWorkers(serverWorld, player, stack, structures, pos);
-			boolean started = workerManager.start();
-			if (!started) {
-				setNotFound(stack, 0, 0);
-			}
-		}
-	}
-	
-	public void succeed(ItemStack stack, Identifier structureID, int x, int z, int samples, boolean displayCoordinates) {
-		setFound(stack, structureID, x, z, samples);
-		setDisplayCoordinates(stack, displayCoordinates);
-		workerManager.clear();
-	}
-	
-	public void fail(ItemStack stack, int radius, int samples) {
-		workerManager.pop();
-		boolean started = workerManager.start();
-		if (!started) {
-			setNotFound(stack, radius, samples);
-		}
-	}
+        return TypedActionResult.pass(player.getStackInHand(hand));
+    }
 
-	public boolean isActive(ItemStack stack) {
-		if (ItemUtils.isCompass(stack)) {
-			return getState(stack) != CompassState.INACTIVE;
-		}
+    public void searchForStructure(World world, PlayerEntity player, Identifier structureID, List<Identifier> structureIDs, BlockPos pos, ItemStack stack) {
+        setSearching(stack, structureID);
+        setSearchRadius(stack, 0);
+        if (world instanceof ServerWorld) {
+            ServerWorld serverWorld = (ServerWorld) world;
+            List<Pair<Identifier, Structure>> structures = new ArrayList<>();
+            for (Identifier id : structureIDs) {
+                structures.add(new Pair<>(
+                  id,
+                  StructureUtils.getStructureForID(serverWorld, id)
+                ));
+            }
+            workerManager.stop();
+            workerManager.createWorkers(serverWorld, player, stack, structures, pos);
+            boolean started = workerManager.start();
+            if (!started) {
+                setNotFound(stack, 0, 0);
+            }
+        }
+    }
 
-		return false;
-	}
+    public void succeed(ItemStack stack, Identifier structureID, int x, int z, int samples, boolean displayCoordinates) {
+        setFound(stack, structureID, x, z, samples);
+        setDisplayCoordinates(stack, displayCoordinates);
+        workerManager.clear();
+    }
 
-	public void setSearching(ItemStack stack, Identifier structureID) {
-		if (ItemUtils.isCompass(stack)) {
-			stack.set(ExplorersCompass.STRUCTURE_ID_COMPONENT, structureID.toString());
-			stack.set(ExplorersCompass.COMPASS_STATE_COMPONENT, CompassState.SEARCHING.getID());
-		}
-	}
+    public void fail(ItemStack stack, int radius, int samples) {
+        workerManager.pop();
+        boolean started = workerManager.start();
+        if (!started) {
+            setNotFound(stack, radius, samples);
+        }
+    }
 
-	public void setFound(ItemStack stack, Identifier structureID, int x, int z, int samples) {
-		if (ItemUtils.isCompass(stack)) {
-			stack.set(ExplorersCompass.STRUCTURE_ID_COMPONENT, structureID.toString());
-			stack.set(ExplorersCompass.COMPASS_STATE_COMPONENT, CompassState.FOUND.getID());
-			stack.set(ExplorersCompass.FOUND_X_COMPONENT, x);
-			stack.set(ExplorersCompass.FOUND_Z_COMPONENT, z);
-			stack.set(ExplorersCompass.SAMPLES_COMPONENT, samples);
-		}
-	}
+    public boolean isActive(ItemStack stack) {
+        if (ItemUtils.isCompass(stack)) {
+            return getState(stack) != CompassState.INACTIVE;
+        }
 
-	public void setNotFound(ItemStack stack, int searchRadius, int samples) {
-		if (ItemUtils.isCompass(stack)) {
-			stack.set(ExplorersCompass.COMPASS_STATE_COMPONENT, CompassState.NOT_FOUND.getID());
-			stack.set(ExplorersCompass.SEARCH_RADIUS_COMPONENT, searchRadius);
-			stack.set(ExplorersCompass.SAMPLES_COMPONENT, samples);
-		}
-	}
+        return false;
+    }
 
-	public void setInactive(ItemStack stack) {
-		if (ItemUtils.isCompass(stack)) {
-			stack.set(ExplorersCompass.COMPASS_STATE_COMPONENT, CompassState.INACTIVE.getID());
-		}
-	}
+    public void setSearching(ItemStack stack, Identifier structureID) {
+        if (ItemUtils.isCompass(stack)) {
+            stack.set(ExplorersCompass.STRUCTURE_ID_COMPONENT, structureID.toString());
+            stack.set(ExplorersCompass.COMPASS_STATE_COMPONENT, CompassState.SEARCHING.getID());
+        }
+    }
 
-	public void setState(ItemStack stack, BlockPos pos, CompassState state) {
-		if (ItemUtils.isCompass(stack)) {
-			stack.set(ExplorersCompass.COMPASS_STATE_COMPONENT, state.getID());
-		}
-	}
+    public void setFound(ItemStack stack, Identifier structureID, int x, int z, int samples) {
+        if (ItemUtils.isCompass(stack)) {
+            stack.set(ExplorersCompass.STRUCTURE_ID_COMPONENT, structureID.toString());
+            stack.set(ExplorersCompass.COMPASS_STATE_COMPONENT, CompassState.FOUND.getID());
+            stack.set(ExplorersCompass.FOUND_X_COMPONENT, x);
+            stack.set(ExplorersCompass.FOUND_Z_COMPONENT, z);
+            stack.set(ExplorersCompass.SAMPLES_COMPONENT, samples);
+        }
+    }
 
-	public void setFoundStructureX(ItemStack stack, int x) {
-		if (ItemUtils.isCompass(stack)) {
-			stack.set(ExplorersCompass.FOUND_X_COMPONENT, x);
-		}
-	}
+    public void setNotFound(ItemStack stack, int searchRadius, int samples) {
+        if (ItemUtils.isCompass(stack)) {
+            stack.set(ExplorersCompass.COMPASS_STATE_COMPONENT, CompassState.NOT_FOUND.getID());
+            stack.set(ExplorersCompass.SEARCH_RADIUS_COMPONENT, searchRadius);
+            stack.set(ExplorersCompass.SAMPLES_COMPONENT, samples);
+        }
+    }
 
-	public void setFoundStructureZ(ItemStack stack, int z) {
-		if (ItemUtils.isCompass(stack)) {
-			stack.set(ExplorersCompass.FOUND_Z_COMPONENT, z);
-		}
-	}
+    public void setInactive(ItemStack stack) {
+        if (ItemUtils.isCompass(stack)) {
+            stack.set(ExplorersCompass.COMPASS_STATE_COMPONENT, CompassState.INACTIVE.getID());
+        }
+    }
 
-	public void setStructureKey(ItemStack stack, Identifier structureID) {
-		if (ItemUtils.isCompass(stack)) {
-			stack.set(ExplorersCompass.STRUCTURE_ID_COMPONENT, structureID.toString());
-		}
-	}
+    public void setState(ItemStack stack, BlockPos pos, CompassState state) {
+        if (ItemUtils.isCompass(stack)) {
+            stack.set(ExplorersCompass.COMPASS_STATE_COMPONENT, state.getID());
+        }
+    }
 
-	public void setSearchRadius(ItemStack stack, int searchRadius) {
-		if (ItemUtils.isCompass(stack)) {
-			stack.set(ExplorersCompass.SEARCH_RADIUS_COMPONENT, searchRadius);
-		}
-	}
+    public void setFoundStructureX(ItemStack stack, int x) {
+        if (ItemUtils.isCompass(stack)) {
+            stack.set(ExplorersCompass.FOUND_X_COMPONENT, x);
+        }
+    }
 
-	public void setSamples(ItemStack stack, int samples) {
-		if (ItemUtils.isCompass(stack)) {
-			stack.set(ExplorersCompass.SAMPLES_COMPONENT, samples);
-		}
-	}
-	
-	public void setDisplayCoordinates(ItemStack stack, boolean displayPosition) {
-		if (ItemUtils.isCompass(stack)) {
-			stack.set(ExplorersCompass.DISPLAY_COORDS_COMPONENT, displayPosition);
-		}
-	}
+    public void setFoundStructureZ(ItemStack stack, int z) {
+        if (ItemUtils.isCompass(stack)) {
+            stack.set(ExplorersCompass.FOUND_Z_COMPONENT, z);
+        }
+    }
 
-	public CompassState getState(ItemStack stack) {
-		if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.COMPASS_STATE_COMPONENT)) {
-			return CompassState.fromID(stack.get(ExplorersCompass.COMPASS_STATE_COMPONENT));
-		}
+    public void setStructureKey(ItemStack stack, Identifier structureID) {
+        if (ItemUtils.isCompass(stack)) {
+            stack.set(ExplorersCompass.STRUCTURE_ID_COMPONENT, structureID.toString());
+        }
+    }
 
-		return null;
-	}
+    public void setSearchRadius(ItemStack stack, int searchRadius) {
+        if (ItemUtils.isCompass(stack)) {
+            stack.set(ExplorersCompass.SEARCH_RADIUS_COMPONENT, searchRadius);
+        }
+    }
 
-	public int getFoundStructureX(ItemStack stack) {
-		if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.FOUND_X_COMPONENT)) {
-			return stack.get(ExplorersCompass.FOUND_X_COMPONENT);
-		}
+    public void setSamples(ItemStack stack, int samples) {
+        if (ItemUtils.isCompass(stack)) {
+            stack.set(ExplorersCompass.SAMPLES_COMPONENT, samples);
+        }
+    }
 
-		return 0;
-	}
+    public void setDisplayCoordinates(ItemStack stack, boolean displayPosition) {
+        if (ItemUtils.isCompass(stack)) {
+            stack.set(ExplorersCompass.DISPLAY_COORDS_COMPONENT, displayPosition);
+        }
+    }
 
-	public int getFoundStructureZ(ItemStack stack) {
-		if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.FOUND_Z_COMPONENT)) {
-			return stack.get(ExplorersCompass.FOUND_Z_COMPONENT);
-		}
+    public CompassState getState(ItemStack stack) {
+        if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.COMPASS_STATE_COMPONENT)) {
+            return CompassState.fromID(stack.get(ExplorersCompass.COMPASS_STATE_COMPONENT));
+        }
 
-		return 0;
-	}
+        return null;
+    }
 
-	public Identifier getStructureID(ItemStack stack) {
-		if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.STRUCTURE_ID_COMPONENT)) {
-			return Identifier.of(stack.get(ExplorersCompass.STRUCTURE_ID_COMPONENT));
-		}
+    public int getFoundStructureX(ItemStack stack) {
+        if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.FOUND_X_COMPONENT)) {
+            return stack.get(ExplorersCompass.FOUND_X_COMPONENT);
+        }
 
-		return Identifier.of("", "");
-	}
+        return 0;
+    }
 
-	public int getSearchRadius(ItemStack stack) {
-		if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.SEARCH_RADIUS_COMPONENT)) {
-			return stack.get(ExplorersCompass.SEARCH_RADIUS_COMPONENT);
-		}
+    public int getFoundStructureZ(ItemStack stack) {
+        if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.FOUND_Z_COMPONENT)) {
+            return stack.get(ExplorersCompass.FOUND_Z_COMPONENT);
+        }
 
-		return -1;
-	}
+        return 0;
+    }
 
-	public int getSamples(ItemStack stack) {
-		if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.SAMPLES_COMPONENT)) {
-			return stack.get(ExplorersCompass.SAMPLES_COMPONENT);
-		}
+    public Identifier getStructureID(ItemStack stack) {
+        if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.STRUCTURE_ID_COMPONENT)) {
+            return Identifier.of(stack.get(ExplorersCompass.STRUCTURE_ID_COMPONENT));
+        }
 
-		return -1;
-	}
+        return Identifier.of("", "");
+    }
 
-	public int getDistanceToBiome(PlayerEntity player, ItemStack stack) {
-		return StructureUtils.getHorizontalDistanceToLocation(player, getFoundStructureX(stack), getFoundStructureZ(stack));
-	}
-	
-	public boolean shouldDisplayCoordinates(ItemStack stack) {
-		if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.DISPLAY_COORDS_COMPONENT)) {
-			return stack.get(ExplorersCompass.DISPLAY_COORDS_COMPONENT);
-		}
+    public int getSearchRadius(ItemStack stack) {
+        if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.SEARCH_RADIUS_COMPONENT)) {
+            return stack.get(ExplorersCompass.SEARCH_RADIUS_COMPONENT);
+        }
 
-		return true;
-	}
+        return -1;
+    }
+
+    public int getSamples(ItemStack stack) {
+        if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.SAMPLES_COMPONENT)) {
+            return stack.get(ExplorersCompass.SAMPLES_COMPONENT);
+        }
+
+        return -1;
+    }
+
+    public int getDistanceToBiome(PlayerEntity player, ItemStack stack) {
+        return StructureUtils.getHorizontalDistanceToLocation(player, getFoundStructureX(stack), getFoundStructureZ(stack));
+    }
+
+    public boolean shouldDisplayCoordinates(ItemStack stack) {
+        if (ItemUtils.isCompass(stack) && stack.contains(ExplorersCompass.DISPLAY_COORDS_COMPONENT)) {
+            return stack.get(ExplorersCompass.DISPLAY_COORDS_COMPONENT);
+        }
+
+        return true;
+    }
 
 }
